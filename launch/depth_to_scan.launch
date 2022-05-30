@@ -1,0 +1,38 @@
+<launch>
+    
+    <arg name="base_frame" default="base_link" />
+    <arg name="max_distance_meter" default="5.0" />
+    <arg name="min_distance_meter" default="0.05" />
+    <arg name="min_h" default="0.1" />
+    <arg name="max_h" default="1.5" />
+
+    <arg name="min_deg_angle" default="-90.0" />
+    <arg name="max_deg_angle" default="90.0" />
+
+
+
+    <node name="depth_to_scan_node" pkg="depth_to_scan" 
+            type="depth_to_scan_node" required = "true">   
+
+        <param name="base_frame" value="$(arg base_frame)" /> 
+
+        <param name="max_distance_meter" value="$(arg max_distance_meter)" /> 
+        <param name="min_distance_meter" value="$(arg min_distance_meter)" /> 
+        <param name="min_h" value="$(arg min_h)" /> 
+        <param name="max_h" value="$(arg max_h)" /> 
+
+        <param name="min_deg_angle" value="$(arg min_deg_angle)" /> 
+        <param name="max_deg_angle" value="$(arg max_deg_angle)" /> 
+
+
+
+    </node>
+
+     <!-- for testing-->
+     
+    <!-- <node pkg="tf" type="static_transform_publisher" name="camera_tf_node" args="0 0 0 0 0 0 1  base_link camera_link 100" />--> -->
+
+
+
+    
+</launch>
