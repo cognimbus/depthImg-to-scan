@@ -1,9 +1,9 @@
 <launch>
     
     <arg name="base_frame" default="base_link" />
-    <arg name="max_distance_meter" default="5.0" />
-    <arg name="min_distance_meter" default="0.05" />
-    <arg name="min_h" default="0.1" />
+    <arg name="max_distance_meter" default="2.0" />
+    <arg name="min_distance_meter" default="0.1" />
+    <arg name="min_h" default="0.2" />
     <arg name="max_h" default="1.5" />
 
     <arg name="min_deg_angle" default="-90.0" />
@@ -30,7 +30,7 @@
 
      <!-- for testing-->
      
-    <!-- <node pkg="tf" type="static_transform_publisher" name="camera_tf_node" args="0 0 0 0 0 0 1  base_link camera_link 100" />--> -->
+    <node pkg="tf" type="static_transform_publisher" name="camera_tf_node" args="0.225 0 0.65 0 0 0 1  base_link camera_link 100" />-->
 
 
 

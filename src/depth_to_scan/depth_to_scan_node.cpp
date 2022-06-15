@@ -205,6 +205,15 @@ private:
             float minAngleRad = 9999;
             float maxAngleRad = -9999;
 
+
+            ////////////////////////////
+            pcl::PointCloud<pcl::PointXYZRGB> cloud;
+            cloud.header.frame_id = base_frame_;
+
+          
+         
+            ////////////////////
+
             // loop over dpeth img
             for(int j =0; j <depth.rows ; j++){
 
@@ -220,6 +229,32 @@ private:
                         continue;
                     }
 
+                    {
+                        pcl::PointXYZRGB pRGB;  
+                        const cv::Point2d uv_rect(i,j);	
+                        cv::Point3d threedp = pinholeCameraModel_.projectPixelTo3dRay(uv_rect);  
+                        threedp.x *=  distM;
+                        threedp.y *=  distM;
+                        threedp.z *=  distM;
+                        auto tmpPose = transformToByFrames(threedp, base_frame_ , source_frame );
+    
+
+
+                        pRGB.x =  tmpPose.point.x; 
+                        pRGB.y =  tmpPose.point.y; 
+                        pRGB.z =  tmpPose.point.z;           
+                        
+
+
+                        uint8_t r = 0;
+                        uint8_t g = 255;
+                        uint8_t b = 0;
+
+                        uint32_t rgb = ((uint32_t)r << 16 | (uint32_t)g << 8 | (uint32_t)b);
+                        pRGB.rgb = *reinterpret_cast<float*>(&rgb);
+
+                        cloud.points.push_back(pRGB); 
+                    }
 
                     // point to far or too close
                     if ( distM > maxDistMeters_
@@ -278,8 +313,10 @@ private:
             }           
 
 
+            pubPclLaser_.publish(cloud); 
+
             // //  publish cloud
-            // publishPointCloud(deg_dist_map);
+            //publishPointCloud(deg_dist_map);
 
 
             //  publish scan
@@ -313,11 +350,11 @@ private:
             pRGB.z =    0;                   
             
 
-            //cerr<<" closestDistM "<<closestDistM<<" angle "<<it->first<<" x "<<pRGB.x<<" y "<<pRGB.y<<endl;
+        //    cerr<<" closestDistM "<<closestDistM<<" angle "<<it->first<<" x "<<pRGB.x<<" y "<<pRGB.y<<endl;
 
             uint8_t r = 0;
             uint8_t g = 255;
-            uint8_t b = 255;
+            uint8_t b = 0;
 
             uint32_t rgb = ((uint32_t)r << 16 | (uint32_t)g << 8 | (uint32_t)b);
             pRGB.rgb = *reinterpret_cast<float*>(&rgb);
