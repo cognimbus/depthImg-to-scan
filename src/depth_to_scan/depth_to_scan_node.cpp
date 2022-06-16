@@ -72,6 +72,9 @@ using namespace std;
 using namespace cv;
 using namespace pcl;
 
+
+typedef pair<cv::Point3d, float> pair_3d_point_with_distance;
+
 class Depth2Scan{
 
 
@@ -93,16 +96,16 @@ public:
    
 
 
-        depth_image_sub = node_.subscribe("/camera/depth/image_rect_raw", 1,
+        depth_image_sub = node_.subscribe("/camera/aligned_depth_to_color/image_raw", 1,
              &Depth2Scan::depthCallback, this);
 
-        info_sub = node_.subscribe("/camera/depth/camera_info", 1,
+        info_sub = node_.subscribe( "/camera/aligned_depth_to_color/camera_info", 1,
              &Depth2Scan::cameraInfoCallback, this);
 
         scan_pub_ = node_.advertise<sensor_msgs::LaserScan>("/scan_from_depth", 50);
 
         pubPclLaser_ = node_.advertise<pcl::PointCloud<pcl::PointXYZRGB> >
-		 ("/yakir_cloud", 1, true); 
+		 ("/shallow cloud", 1, true); 
     }
 
     ~Depth2Scan(){}
@@ -188,8 +191,7 @@ private:
 
         if (cameraInfoInited_) {           
           
-          
-            std::map<int, float > deg_dist_map;
+            std::map<int, pair_3d_point_with_distance > deg_dist_map;
 
             string depth_camera_link_ = image->header.frame_id;
 
@@ -225,58 +227,35 @@ private:
                     float distM = distValMM / 1000.0;
 
 
-                    if (!std::isfinite(pixel[i]) || distValMM == 0) {
+                    if (!std::isfinite(pixel[i]) || distValMM == 0.0) {
                         continue;
                     }
-
-                    {
-                        pcl::PointXYZRGB pRGB;  
-                        const cv::Point2d uv_rect(i,j);	
-                        cv::Point3d threedp = pinholeCameraModel_.projectPixelTo3dRay(uv_rect);  
-                        threedp.x *=  distM;
-                        threedp.y *=  distM;
-                        threedp.z *=  distM;
-                        auto tmpPose = transformToByFrames(threedp, base_frame_ , source_frame );
-    
-
-
-                        pRGB.x =  tmpPose.point.x; 
-                        pRGB.y =  tmpPose.point.y; 
-                        pRGB.z =  tmpPose.point.z;           
-                        
-
-
-                        uint8_t r = 0;
-                        uint8_t g = 255;
-                        uint8_t b = 0;
-
-                        uint32_t rgb = ((uint32_t)r << 16 | (uint32_t)g << 8 | (uint32_t)b);
-                        pRGB.rgb = *reinterpret_cast<float*>(&rgb);
-
-                        cloud.points.push_back(pRGB); 
-                    }
-
+                    
                     // point to far or too close
                     if ( distM > maxDistMeters_
                          || distM < minDistMeters_ ){
                         continue;
                     }
                   
-                    geometry_msgs::PointStamped pose;
-                    if(!extractDepthFromBboxObject( cv::Point2d(i, j), distValMM, pose)){
-                        continue;
-                    }
+                    const cv::Point2d uv_rect(i,j);	
+                    cv::Point3d threedp = pinholeCameraModel_.projectPixelTo3dRay(uv_rect);  
+                    threedp.x *=  distM;
+                    threedp.y *=  distM;
+                    threedp.z *=  distM;
+                    auto pose = transformToByFrames(threedp, base_frame_ , source_frame );
 
                     // if too high or too low
                     if(  pose.point.z < minHeight_ || pose.point.z > maxHeight_) {
                         continue;
-                    }              
+                    }         
                                       
-    
-                    int angleDeg  = int(angles::to_degrees(atan2(pose.point.y, pose.point.x)));
 
+                    float angleDeg  = (angles::to_degrees(atan2(pose.point.y, pose.point.x)));
+                    // cerr<<" angleDeg "<<angleDeg<<endl;
+
+                    // if out of FOV
                     if( angleDeg < minDegAngle_ || angleDeg > maxDegAngle_){
-
+                        
                         continue;
                     }
 
@@ -294,42 +273,38 @@ private:
                         //angle exsist
                         
                         // update te vaule (distnace)
-                        if(  distM < deg_dist_map[angleDeg] ) {
+                        if(  distM < deg_dist_map[angleDeg].second ) {
 
                             // cerr<<" map angle "<<angleDeg<<" old distance "<<deg_dist_map.at(angleDeg)<<endl;
                             // cerr<<"new distnace "<<distM<<endl;
-                            deg_dist_map.at(angleDeg) = distM;
-                            // cerr<<" after update: map angle "<<angleDeg<<" new distance "<<deg_dist_map.at(angleDeg)<<endl;
-                            // cerr<<"---------------------------------"<<endl;
+                            deg_dist_map.at(angleDeg) = std::make_pair(cv::Point3d(pose.point.x, pose.point.y, pose.point.z), distM);
+                            
                         }
 
                     } else {
                         //create new pair
-                        deg_dist_map[angleDeg] = distM;
+                        deg_dist_map[angleDeg] = std::make_pair( cv::Point3d(pose.point.x, pose.point.y, pose.point.z), distM);
 
-                    }
+                    }                  
 
                 }
             }           
 
 
-            pubPclLaser_.publish(cloud); 
 
             // //  publish cloud
-            //publishPointCloud(deg_dist_map);
+            publishPointCloud(deg_dist_map);
 
 
             //  publish scan
-            publishScan(deg_dist_map);          
-
-            
+            // publishScan(deg_dist_map);            
            
 
         }
             
     }
 
-    void publishPointCloud(const std::map<int, float >& deg_dist_map){
+    void publishPointCloud(const std::map<int, pair_3d_point_with_distance >& deg_dist_map) const {
 
         pcl::PointCloud<pcl::PointXYZRGB> cloud;
         cloud.header.frame_id = base_frame_;
@@ -338,17 +313,18 @@ private:
             
         for (auto it = deg_dist_map.begin(); it != deg_dist_map.end(); ++it)
         {
-            float closestDistM = it->second;
+            float closestDistM = it->second.second;
             float radAngle = angles::from_degrees(it->first);
 
 
             pcl::PointXYZRGB pRGB;                
 
 
-            pRGB.x =   (closestDistM) * cos(radAngle);
-            pRGB.y =   (closestDistM) * sin(radAngle);          
-            pRGB.z =    0;                   
-            
+            pRGB.x =   it->second.first.x;
+            pRGB.y =   it->second.first.y;        
+            pRGB.z =    0;   
+
+           
 
         //    cerr<<" closestDistM "<<closestDistM<<" angle "<<it->first<<" x "<<pRGB.x<<" y "<<pRGB.y<<endl;
 
@@ -367,76 +343,67 @@ private:
 
     }
 
-    void publishScan(const std::map<int, float >& deg_dist_map){
+    // void publishScan(const std::map<int, pair_3d_point_with_distance >& deg_dist_map) const {
 
 
-        unsigned int num_readings = 360;
-        double laser_frequency = 40;
-        double ranges[num_readings];
-        double intensities[num_readings];
+    //     unsigned int num_readings = 360;
+    //     double laser_frequency = 40;
+    //     double ranges[num_readings];
+    //     double intensities[num_readings];
 
-        ros::Time scan_time = ros::Time::now();
+    //     ros::Time scan_time = ros::Time::now();
 
 
-        float angle = angles::from_degrees(num_readings);
-        //populate the LaserScan message
-        sensor_msgs::LaserScan scan;
-        scan.header.stamp = scan_time;
-        scan.header.frame_id = "base_link";
-        scan.angle_min = angles::from_degrees(-(depth_angle / 2));
-        scan.angle_max = angles::from_degrees( depth_angle / 2);
-        scan.angle_increment = angle / num_readings;
-        scan.time_increment = (1 / laser_frequency) / (num_readings);
-        scan.range_min = 0.0;
-        scan.range_max = 100.0;
+    //     float angle = angles::from_degrees(num_readings);
+    //     //populate the LaserScan message
+    //     sensor_msgs::LaserScan scan;
+    //     scan.header.stamp = scan_time;
+    //     scan.header.frame_id = "base_link";
+    //     scan.angle_min = angles::from_degrees(-(depth_angle / 2));
+    //     scan.angle_max = angles::from_degrees( depth_angle / 2);
+    //     scan.angle_increment = angle / num_readings;
+    //     scan.time_increment = (1 / laser_frequency) / (num_readings);
+    //     scan.range_min = 0.0;
+    //     scan.range_max = 100.0;
 
-        scan.ranges.resize(num_readings);
-        scan.intensities.resize(num_readings);
+    //     scan.ranges.resize(num_readings);
+    //     scan.intensities.resize(num_readings);
 
-        // scan.ranges[0] = 5;  //-90 deg
-        // scan.ranges[num_readings-1] = 2; // +90 deg
-        // scan.ranges[num_readings /2 ] = 4; // 0 deg
+     
         
 
-        for (auto it = deg_dist_map.begin(); it != deg_dist_map.end(); ++it)
-        {   
-            int deg =  it->first;
+    //     for (auto it = deg_dist_map.begin(); it != deg_dist_map.end(); ++it)
+    //     {   
+    //         int deg =  it->first;
             
 
-            if( deg < 0){
+    //         if( deg < 0){
 
-                int cellNum = deg + (depth_angle /2);
-                scan.ranges[cellNum] =  it->second;
-                //scan.intensities[cellNum] = 100;
-                // cerr<<" cellNum "<<cellNum<<" deg "<<deg<<" distance "<<it->second<<endl;
+    //             int cellNum = deg + (depth_angle /2);
+    //             scan.ranges[cellNum] =  it->second.second;               
+    //         } 
+    //         else if( deg >= 0 && deg < (depth_angle /2)) {
+    //             scan.ranges[deg + (depth_angle /2)] =  it->second.second;
+    //         }           
 
-
-            } 
-            else if( deg >= 0 && deg < (depth_angle /2)) {
-                scan.ranges[deg + (depth_angle /2)] =  it->second;
-            }
-            
-
-        }  
+    //     }  
 
         
-        scan_pub_.publish(scan);
+    //     scan_pub_.publish(scan);
 
 
-    }
+    // }
     
    
 
-    bool extractDepthFromBboxObject( cv::Point2d pix, float d,
+    bool extractDepthFromBboxObject(const cv::Point2d uv_rect, float d,
            geometry_msgs::PointStamped& pose) {
        
 
-        if( isinf(d) || d == 0){
-            return false;
-        }
-
-        float dM = d / 1000;
-        cv::Point3d p = cv::Point3d(((pix.x - cx_) * dM / fx_), ((pix.y - cy_) * dM / fy_), dM);
+        cv::Point3d p = pinholeCameraModel_.projectPixelTo3dRay(uv_rect);  
+        p.x *=  d;
+        p.y *=  d;
+        p.z *=  d;
 
         pose = transformToByFrames(p, base_frame_ , source_frame );
            
